@@ -4,21 +4,29 @@ use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+
 use crossbeam::atomic::AtomicCell;
+use crossbeam::sync::Unparker;
 use crossbeam_skiplist::SkipMap;
 use dashmap::DashMap;
-use parking_lot::RwLock;
-use crate::channel::{DEFAULT_TOKEN_INDEX, Route, Status};
+use parking_lot::{Mutex, RwLock};
+
+use crate::channel::{DEFAULT_TOKEN_INDEX, Route, RouteKey, Status};
 
 pub struct Sender<ID> {
     pub(crate) src_default_udp: UdpSocket,
     pub(crate) share_info: Arc<RwLock<Vec<UdpSocket>>>,
     pub(crate) direct_route_table: Arc<DashMap<ID, Route>>,
-    pub(crate) direct_route_table_time: Arc<SkipMap<Route, (ID, AtomicI64, AtomicI64)>>,
+    pub(crate) direct_route_table_time: Arc<SkipMap<RouteKey, (ID, AtomicI64, AtomicI64)>>,
     pub(crate) status: Arc<AtomicCell<Status>>,
+    pub(crate) un_parker: Unparker,
+    pub(crate) lock: Arc<Mutex<()>>,
 }
 
 impl<ID> Sender<ID> {
+    pub fn is_close(&self) -> bool {
+        self.status.load() == Status::Close
+    }
     /// 当前是否是锥形网络
     pub fn is_clone(&self) -> bool {
         self.status.load() == Status::Cone
@@ -30,18 +38,20 @@ impl<ID> Sender<ID> {
             share_info: self.share_info.clone(),
             direct_route_table: self.direct_route_table.clone(),
             direct_route_table_time: self.direct_route_table_time.clone(),
+            un_parker: self.un_parker.clone(),
+            lock: self.lock.clone(),
         })
     }
     /// 发送到指定路由
-    pub fn send_to_route(&self, buf: &[u8], route: &Route) -> io::Result<usize> {
-        if let Some(time) = self.direct_route_table_time.get(route) {
+    pub fn send_to_route(&self, buf: &[u8], route_key: &RouteKey) -> io::Result<usize> {
+        if let Some(time) = self.direct_route_table_time.get(route_key) {
             time.value().2.store(chrono::Local::now().timestamp_millis(), Ordering::Relaxed);
         }
-        if route.index == DEFAULT_TOKEN_INDEX {
-            self.src_default_udp.send_to(buf, route.addr)
+        if route_key.index == DEFAULT_TOKEN_INDEX {
+            self.src_default_udp.send_to(buf, route_key.addr)
         } else {
-            if let Some(udp) = self.share_info.read().get(route.index) {
-                udp.send_to(buf, route.addr)
+            if let Some(udp) = self.share_info.read().get(route_key.index) {
+                udp.send_to(buf, route_key.addr)
             } else {
                 Err(Error::new(ErrorKind::Other, "not fount"))
             }
@@ -68,8 +78,50 @@ impl<ID: Eq + Hash + Clone> Sender<ID> {
                 Err(Error::new(ErrorKind::Other, "not fount route"))
             }
             Some(e) => {
-                self.send_to_route(buf, e.value())
+                self.send_to_route(buf, &e.value().route_key())
             }
         }
+    }
+}
+
+impl<ID: Hash + Eq + Clone + Send + 'static> Sender<ID> {
+    /// 添加路由
+    pub fn add_route(&self, id: ID, route: Route) {
+        let lock = self.lock.lock();
+        if let Some(old) = self.direct_route_table.insert(id.clone(), route) {
+            self.direct_route_table_time.remove(&old.route_key());
+        }
+        let time = chrono::Local::now().timestamp_millis();
+        self.direct_route_table_time.insert(route.route_key(), (id, AtomicI64::new(time), AtomicI64::new(time)));
+        drop(lock);
+        self.un_parker.unpark();
+    }
+    pub fn update_route(&self, id: &ID, metric: u8, rt: i64) {
+        if let Some(mut v) = self.direct_route_table.get_mut(id) {
+            v.metric = metric;
+            v.rt = rt;
+        }
+    }
+    /// 查询路由
+    pub fn route(&self, id: &ID) -> Option<Route> {
+        self.direct_route_table.get(id).map(|e| *e.value())
+    }
+    /// 删除路由
+    pub fn remove_route(&self, id: &ID) {
+        let lock = self.lock.lock();
+        if let Some((_, route)) = self.direct_route_table.remove(id) {
+            self.direct_route_table_time.remove(&route.route_key());
+        }
+        drop(lock);
+    }
+    pub fn route_to_id(&self, route_key: &RouteKey) -> Option<ID> {
+        if let Some(v) = self.direct_route_table_time.get(route_key) {
+            Some(v.value().0.clone())
+        } else {
+            None
+        }
+    }
+    pub fn route_list(&self) -> Vec<(ID, Route)> {
+        self.direct_route_table.iter().map(|k| (k.key().clone(), k.value().clone())).collect()
     }
 }

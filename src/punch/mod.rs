@@ -5,7 +5,7 @@ use std::io::{Error, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
-use crossbeam::channel::{Receiver, RecvError, RecvTimeoutError};
+use crossbeam::channel::{Receiver, RecvTimeoutError};
 use rand::prelude::SliceRandom;
 
 use crate::channel::sender::Sender;
@@ -83,6 +83,12 @@ impl<ID> Punch<ID> {
 
 impl<ID: Clone + Eq + Hash> Punch<ID> {
     pub fn punch(&mut self, buf: &[u8], id: ID, nat_info: NatInfo) -> io::Result<()> {
+        if self.sender.is_close() {
+            return Err(Error::new(ErrorKind::Other, "close"));
+        }
+        if !nat_info.local_ip.is_unspecified() {
+            let _ = self.sender.send_to_addr(buf, SocketAddr::new(nat_info.local_ip, nat_info.local_port));
+        }
         let is_cone = self.sender.is_clone();
         match nat_info.nat_type {
             NatType::Symmetric => {
@@ -97,7 +103,7 @@ impl<ID: Clone + Eq + Hash> Punch<ID> {
                 } else {
                     (5, 10)
                 };
-                if nat_info.public_port_range < max_k1 * 2 {
+                if nat_info.public_port_range < max_k1 * 4 {
                     //端口变化不大时，在预测的范围内随机发送
                     let min_port = if nat_info.public_port > nat_info.public_port_range {
                         nat_info.public_port - nat_info.public_port_range
@@ -168,21 +174,27 @@ pub enum NatType {
 
 #[derive(Clone, Debug)]
 pub struct NatInfo {
-    public_ips: Vec<IpAddr>,
-    public_port: u16,
-    public_port_range: u16,
-    pub(crate) nat_type: NatType,
+    pub public_ips: Vec<IpAddr>,
+    pub public_port: u16,
+    pub public_port_range: u16,
+    pub local_ip: IpAddr,
+    pub local_port: u16,
+    pub nat_type: NatType,
 }
 
 impl NatInfo {
     pub fn new(public_ips: Vec<IpAddr>,
                public_port: u16,
                public_port_range: u16,
+               local_ip: IpAddr,
+               local_port: u16,
                nat_type: NatType, ) -> Self {
         Self {
             public_ips,
             public_port,
             public_port_range,
+            local_ip,
+            local_port,
             nat_type,
         }
     }

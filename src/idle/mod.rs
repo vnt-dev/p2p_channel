@@ -2,12 +2,11 @@ use std::io;
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::thread::Thread;
 use std::time::Duration;
 use crossbeam::atomic::AtomicCell;
 use crossbeam::sync::Parker;
 use crossbeam_skiplist::SkipMap;
-use crate::channel::{Route, Status};
+use crate::channel::{ RouteKey, Status};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IdleStatus {
@@ -20,13 +19,13 @@ pub struct Idle<ID> {
     read_idle: i64,
     write_idle: i64,
     parker: Parker,
-    direct_route_table_time: Arc<SkipMap<Route, (ID, AtomicI64, AtomicI64)>>,
+    direct_route_table_time: Arc<SkipMap<RouteKey, (ID, AtomicI64, AtomicI64)>>,
     status: Arc<AtomicCell<Status>>,
 }
 
 impl<ID> Idle<ID> {
     pub(crate) fn new(read_idle: i64, write_idle: i64, parker: Parker,
-                      direct_route_table_time: Arc<SkipMap<Route, (ID, AtomicI64, AtomicI64)>>, status: Arc<AtomicCell<Status>>, ) -> Idle<ID> {
+                      direct_route_table_time: Arc<SkipMap<RouteKey, (ID, AtomicI64, AtomicI64)>>, status: Arc<AtomicCell<Status>>, ) -> Idle<ID> {
         Idle {
             write_idle,
             read_idle,
@@ -39,7 +38,7 @@ impl<ID> Idle<ID> {
 
 impl<ID: Clone> Idle<ID> {
     /// 获取空闲路由
-    pub fn next_idle(&self) -> io::Result<(IdleStatus, ID, Route)> {
+    pub fn next_idle(&self) -> io::Result<(IdleStatus, ID, RouteKey)> {
         loop {
             let now = chrono::Local::now().timestamp_millis();
             let last_read_idle = now - self.read_idle;
