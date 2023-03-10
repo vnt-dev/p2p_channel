@@ -88,11 +88,14 @@ impl<ID: Hash + Eq + Clone + Send + 'static> Sender<ID> {
     /// 添加路由
     pub fn add_route(&self, id: ID, route: Route) {
         let lock = self.lock.lock();
-        if let Some(old) = self.direct_route_table.insert(id.clone(), route) {
-            self.direct_route_table_time.remove(&old.route_key());
-        }
         let time = chrono::Local::now().timestamp_millis();
-        self.direct_route_table_time.insert(route.route_key(), (id, AtomicI64::new(time), AtomicI64::new(time)));
+        self.direct_route_table_time.insert(route.route_key(), (id.clone(), AtomicI64::new(time), AtomicI64::new(time)));
+        let route_key = route.route_key();
+        if let Some(old) = self.direct_route_table.insert(id, route) {
+            if old.route_key() != route_key {
+                self.direct_route_table_time.remove(&old.route_key());
+            }
+        }
         drop(lock);
         self.un_parker.unpark();
     }

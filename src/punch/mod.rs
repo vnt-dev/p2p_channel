@@ -19,6 +19,9 @@ pub struct Punch<ID> {
 }
 
 impl<ID> Punch<ID> {
+    pub fn sender(&self) -> &Sender<ID> {
+        &self.sender
+    }
     pub fn try_clone(&self) -> io::Result<Punch<ID>> {
         let mut rng = rand::thread_rng();
         let mut port_vec = self.port_vec.clone();
