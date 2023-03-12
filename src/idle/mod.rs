@@ -6,7 +6,8 @@ use std::time::Duration;
 use crossbeam::atomic::AtomicCell;
 use crossbeam::sync::Parker;
 use crossbeam_skiplist::SkipMap;
-use crate::channel::{ RouteKey, Status};
+use parking_lot::Mutex;
+use crate::channel::{RouteKey, Status};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum IdleStatus {
@@ -19,13 +20,13 @@ pub struct Idle<ID> {
     read_idle: i64,
     write_idle: i64,
     parker: Parker,
-    direct_route_table_time: Arc<SkipMap<RouteKey, (ID, AtomicI64, AtomicI64)>>,
+    direct_route_table_time: Arc<SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>>,
     status: Arc<AtomicCell<Status>>,
 }
 
 impl<ID> Idle<ID> {
     pub(crate) fn new(read_idle: i64, write_idle: i64, parker: Parker,
-                      direct_route_table_time: Arc<SkipMap<RouteKey, (ID, AtomicI64, AtomicI64)>>, status: Arc<AtomicCell<Status>>, ) -> Idle<ID> {
+                      direct_route_table_time: Arc<SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>>, status: Arc<AtomicCell<Status>>, ) -> Idle<ID> {
         Idle {
             write_idle,
             read_idle,
@@ -38,7 +39,7 @@ impl<ID> Idle<ID> {
 
 impl<ID: Clone> Idle<ID> {
     /// 获取空闲路由
-    pub fn next_idle(&self) -> io::Result<(IdleStatus, ID, RouteKey)> {
+    pub fn next_idle(&self) -> io::Result<(IdleStatus, Vec<ID>, RouteKey)> {
         loop {
             let now = chrono::Local::now().timestamp_millis();
             let last_read_idle = now - self.read_idle;
@@ -60,16 +61,16 @@ impl<ID: Clone> Idle<ID> {
                     let last_write = entry.value().2.load(Ordering::Relaxed);
                     if last_write < last_write_idle {
                         if is_read_idle {
-                            return Ok((IdleStatus::Both, entry.value().0.clone(), *entry.key()));
+                            return Ok((IdleStatus::Both, entry.value().0.lock().clone(), *entry.key()));
                         }
-                        return Ok((IdleStatus::Write, entry.value().0.clone(), *entry.key()));
+                        return Ok((IdleStatus::Write, entry.value().0.lock().clone(), *entry.key()));
                     }
                     if min > last_write {
                         min = last_write;
                     }
                 }
                 if is_read_idle {
-                    return Ok((IdleStatus::Read, entry.value().0.clone(), *entry.key()));
+                    return Ok((IdleStatus::Read, entry.value().0.lock().clone(), *entry.key()));
                 }
             }
             if self.direct_route_table_time.is_empty() {

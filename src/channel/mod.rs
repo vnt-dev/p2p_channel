@@ -86,7 +86,7 @@ pub struct Channel<ID> {
     share_info: Arc<RwLock<Vec<UdpSocket>>>,
     udp_list: Vec<MioUdpSocket>,
     direct_route_table: Arc<DashMap<ID, Route>>,
-    direct_route_table_time: Arc<SkipMap<RouteKey, (ID, AtomicI64, AtomicI64)>>,
+    direct_route_table_time: Arc<SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>>,
     poll: Poll,
     change_waker_list: Arc<Mutex<Vec<(u64, Waker)>>>,
     events: Events,
@@ -113,7 +113,7 @@ const CHANGE_TOKEN: Token = Token(10_0001);
 impl<ID: Eq + Hash> Channel<ID> {
     pub(crate) fn new(size: usize, cone_sender: PunchSender<(ID, NatInfo)>,
                       symmetric_sender: PunchSender<(ID, NatInfo)>,
-                      direct_route_table_time: Arc<SkipMap<RouteKey, (ID, AtomicI64, AtomicI64)>>,
+                      direct_route_table_time: Arc<SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>>,
                       un_parker: Unparker, status: Arc<AtomicCell<Status>>) -> io::Result<Channel<ID>> {
         let channel_flag_gen = Arc::new(AtomicU64::new(1));
         let channel_flag = 0;
@@ -211,13 +211,13 @@ impl<ID: Eq + Hash> Channel<ID> {
 
 impl<ID> Channel<ID> {
     #[inline]
-    fn update_time(direct_route_table_time: &SkipMap<RouteKey, (ID, AtomicI64, AtomicI64)>, route: &RouteKey) {
+    fn update_time(direct_route_table_time: &SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>, route: &RouteKey) {
         if let Some(time) = direct_route_table_time.get(route) {
             time.value().1.store(chrono::Local::now().timestamp_millis(), Ordering::Relaxed);
         }
     }
     #[inline]
-    fn udp_recv_(direct_route_table_time: &SkipMap<RouteKey, (ID, AtomicI64, AtomicI64)>, udp: &MioUdpSocket, index: usize, buf: &mut [u8]) -> Option<io::Result<(usize, RouteKey)>> {
+    fn udp_recv_(direct_route_table_time: &SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>, udp: &MioUdpSocket, index: usize, buf: &mut [u8]) -> Option<io::Result<(usize, RouteKey)>> {
         return match udp.recv_from(buf) {
             Ok((len, addr)) => {
                 let route = RouteKey::new(index, addr);
@@ -316,8 +316,12 @@ impl<ID: Hash + Eq + Clone + Send + 'static> Channel<ID> {
     pub fn add_route(&self, id: ID, route: Route) {
         let lock = self.lock.lock();
         let time = chrono::Local::now().timestamp_millis();
-        self.direct_route_table_time.insert(route.route_key(), (id.clone(), AtomicI64::new(time), AtomicI64::new(time)));
         let route_key = route.route_key();
+        if let Some(entry) = self.direct_route_table_time.get(&route_key) {
+            entry.value().0.lock().push(id.clone())
+        } else {
+            self.direct_route_table_time.insert(route.route_key(), (Mutex::new(vec![id.clone()]), AtomicI64::new(time), AtomicI64::new(time)));
+        }
         if let Some(old) = self.direct_route_table.insert(id, route) {
             if old.route_key() != route_key {
                 self.direct_route_table_time.remove(&old.route_key());
@@ -340,27 +344,25 @@ impl<ID: Hash + Eq + Clone + Send + 'static> Channel<ID> {
     pub fn remove_route(&self, id: &ID) {
         let lock = self.lock.lock();
         if let Some((_, route)) = self.direct_route_table.remove(id) {
-            self.direct_route_table_time.remove(&route.route_key());
+            let route_key = route.route_key();
+            if let Some(e) = self.direct_route_table_time.get(&route_key) {
+                let mut ids = e.value().0.lock();
+                if ids.len() <= 1 {
+                    self.direct_route_table_time.remove(&route_key);
+                } else {
+                    ids.retain(|v| v != id);
+                }
+            }
         }
         drop(lock);
     }
     pub fn route_to_id(&self, route_key: &RouteKey) -> Option<ID> {
         if let Some(v) = self.direct_route_table_time.get(route_key) {
-            Some(v.value().0.clone())
-        } else {
-            None
-        }
-    }
-    pub fn route_by_key(&self, route_key: &RouteKey) -> Option<(ID, Route)> {
-        if let Some(v) = self.direct_route_table_time.get(route_key) {
-            if let Some(route) = self.direct_route_table.get(&v.value().0) {
-                Some((route.key().clone(), route.value().clone()))
-            } else {
-                None
+            if let Some(id) = v.value().0.lock().get(0) {
+                return Some(id.clone());
             }
-        } else {
-            None
         }
+        None
     }
     pub fn route_list(&self) -> Vec<(ID, Route)> {
         self.direct_route_table.iter().map(|k| (k.key().clone(), k.value().clone())).collect()

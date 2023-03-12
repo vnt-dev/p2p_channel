@@ -89,7 +89,7 @@ impl<ID: Clone + Eq + Hash> Punch<ID> {
         if self.sender.is_close() {
             return Err(Error::new(ErrorKind::Other, "close"));
         }
-        if !nat_info.local_ip.is_unspecified() {
+        if !nat_info.local_ip.is_unspecified() || nat_info.local_port != 0 {
             let _ = self.sender.send_to_addr(buf, SocketAddr::new(nat_info.local_ip, nat_info.local_port));
         }
         let is_cone = self.sender.is_clone();
