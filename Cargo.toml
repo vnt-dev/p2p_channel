@@ -1,5 +1,5 @@
 [package]
-name = "nat_traversal"
+name = "p2p_channel"
 version = "0.1.0"
 edition = "2021"
 
