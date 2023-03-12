@@ -119,7 +119,6 @@ impl<ID: Eq + Hash> Channel<ID> {
         let channel_flag = 0;
         let src_default_udp = UdpSocket::bind("0.0.0.0:0")?;
         src_default_udp.set_nonblocking(true)?;
-        println!("{:?}", src_default_udp.local_addr()?);
         let mut default_udp = MioUdpSocket::from_std(src_default_udp.try_clone()?);
         let share_info = Arc::new(RwLock::new(Vec::with_capacity(size)));
         let udp_list = Vec::with_capacity(size);
