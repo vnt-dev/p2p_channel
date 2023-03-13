@@ -314,58 +314,27 @@ impl<ID> Channel<ID> {
 impl<ID: Hash + Eq + Clone + Send + 'static> Channel<ID> {
     /// 添加路由
     pub fn add_route(&self, id: ID, route: Route) {
-        let lock = self.lock.lock();
-        let time = chrono::Local::now().timestamp_millis();
-        let route_key = route.route_key();
-        if let Some(entry) = self.direct_route_table_time.get(&route_key) {
-            entry.value().0.lock().push(id.clone())
-        } else {
-            self.direct_route_table_time.insert(route.route_key(), (Mutex::new(vec![id.clone()]), AtomicI64::new(time), AtomicI64::new(time)));
-        }
-        if let Some(old) = self.direct_route_table.insert(id, route) {
-            if old.route_key() != route_key {
-                self.direct_route_table_time.remove(&old.route_key());
-            }
-        }
-        drop(lock);
-        self.un_parker.unpark();
+        Sender::<ID>::add_route_(id, route, &self.lock, &self.direct_route_table_time, &self.direct_route_table, &self.un_parker);
     }
+    /// 更新路由信息
     pub fn update_route(&self, id: &ID, metric: u8, rt: i64) {
-        if let Some(mut v) = self.direct_route_table.get_mut(id) {
-            v.metric = metric;
-            v.rt = rt;
-        }
+        Sender::<ID>::update_route_(id, metric, rt, &self.direct_route_table)
     }
     /// 查询路由
     pub fn route(&self, id: &ID) -> Option<Route> {
-        self.direct_route_table.get(id).map(|e| *e.value())
+        Sender::<ID>::route_(id, &self.direct_route_table)
     }
     /// 删除路由
     pub fn remove_route(&self, id: &ID) {
-        let lock = self.lock.lock();
-        if let Some((_, route)) = self.direct_route_table.remove(id) {
-            let route_key = route.route_key();
-            if let Some(e) = self.direct_route_table_time.get(&route_key) {
-                let mut ids = e.value().0.lock();
-                if ids.len() <= 1 {
-                    self.direct_route_table_time.remove(&route_key);
-                } else {
-                    ids.retain(|v| v != id);
-                }
-            }
-        }
-        drop(lock);
+        Sender::<ID>::remove_route_(id, &self.lock, &self.direct_route_table_time, &self.direct_route_table);
     }
+    /// 查第一个id
     pub fn route_to_id(&self, route_key: &RouteKey) -> Option<ID> {
-        if let Some(v) = self.direct_route_table_time.get(route_key) {
-            if let Some(id) = v.value().0.lock().get(0) {
-                return Some(id.clone());
-            }
-        }
-        None
+        Sender::<ID>::route_to_id_(route_key, &self.direct_route_table_time)
     }
-    pub fn route_list(&self) -> Vec<(ID, Route)> {
-        self.direct_route_table.iter().map(|k| (k.key().clone(), k.value().clone())).collect()
+    /// 查路由表
+    pub fn route_table(&self) -> Vec<(ID, Route)> {
+        Sender::<ID>::route_table_(&self.direct_route_table)
     }
 }
 

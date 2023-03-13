@@ -163,6 +163,7 @@ impl<ID: Clone + Eq + Hash> Punch<ID> {
                 } else {
                     self.sender.send_to_addr_all(buf, addr)?;
                 }
+                std::thread::sleep(Duration::from_millis(2));
             }
         }
         Ok(())
