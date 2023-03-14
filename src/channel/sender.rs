@@ -49,10 +49,10 @@ impl<ID> Sender<ID> {
             time.value().2.store(chrono::Local::now().timestamp_millis(), Ordering::Relaxed);
         }
         if route_key.index == DEFAULT_TOKEN_INDEX {
-            self.src_default_udp.send_to(buf, route_key.addr)
+            self.src_default_udp.send_all(buf, route_key.addr)
         } else {
             if let Some(udp) = self.share_info.read().get(route_key.index) {
-                udp.send_to(buf, route_key.addr)
+                udp.send_all(buf, route_key.addr)
             } else {
                 Err(Error::new(ErrorKind::Other, "not fount"))
             }
@@ -60,19 +60,61 @@ impl<ID> Sender<ID> {
     }
     /// 发送到指定地址，将使用默认udpSocket发送
     pub fn send_to_addr(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
-        self.src_default_udp.send_to(buf, addr)
+        self.src_default_udp.send_all(buf, addr)
     }
     pub fn send_to_addr_all(&self, buf: &[u8], addr: SocketAddr) -> io::Result<()> {
-        self.src_default_udp.send_to(buf, addr)?;
+        self.src_default_udp.send_all(buf, addr)?;
         let mut count = 0;
         for udp in self.share_info.read().iter() {
-            udp.send_to(buf, addr)?;
+            udp.send_all(buf, addr)?;
             count += 1;
             if count & 2 == 2 {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
         Ok(())
+    }
+}
+
+pub(crate) trait SendAll {
+    fn send_all(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize>;
+}
+
+impl SendAll for UdpSocket {
+    fn send_all(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
+        loop {
+            return match self.send_to(buf, addr) {
+                Ok(len) => {
+                    Ok(len)
+                }
+                Err(e) => {
+                    if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut {
+                        std::thread::yield_now();
+                        continue;
+                    }
+                    Err(e)
+                }
+            };
+        }
+    }
+}
+
+impl SendAll for mio::net::UdpSocket {
+    fn send_all(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
+        loop {
+            return match self.send_to(buf, addr) {
+                Ok(len) => {
+                    Ok(len)
+                }
+                Err(e) => {
+                    if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut {
+                        std::thread::yield_now();
+                        continue;
+                    }
+                    Err(e)
+                }
+            };
+        }
     }
 }
 
@@ -145,8 +187,7 @@ impl<ID: Hash + Eq + Clone + Send + 'static> Sender<ID> {
                                 direct_route_table: &DashMap<ID, Route>, ) {
         let lock = lock.lock();
         if let Some((_, route)) = direct_route_table.remove(id) {
-            let route_key = route.route_key();
-            Sender::<ID>::remove_id_route_(&id, &route_key, direct_route_table_time);
+            Sender::<ID>::remove_id_route_(&id, &route.route_key(), direct_route_table_time);
         }
         drop(lock);
     }
@@ -155,10 +196,9 @@ impl<ID: Hash + Eq + Clone + Send + 'static> Sender<ID> {
                         direct_route_table_time: &SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>) {
         if let Some(e) = direct_route_table_time.get(&route_key) {
             let mut ids = e.value().0.lock();
-            if ids.len() <= 1 {
+            ids.retain(|v| v != id);
+            if ids.is_empty() {
                 direct_route_table_time.remove(&route_key);
-            } else {
-                ids.retain(|v| v != id);
             }
         }
     }

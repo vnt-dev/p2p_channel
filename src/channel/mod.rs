@@ -15,7 +15,7 @@ use mio::{Events, Interest, Poll, Token, Waker};
 use mio::net::UdpSocket as MioUdpSocket;
 use parking_lot::{Mutex, RwLock};
 
-use crate::channel::sender::Sender;
+use crate::channel::sender::{SendAll, Sender};
 use crate::punch::{NatInfo, NatType};
 
 pub mod sender;
@@ -357,10 +357,10 @@ impl<ID: Hash + Eq + Clone> Channel<ID> {
             time.value().2.store(now, Ordering::Relaxed);
         }
         if route_key.index == DEFAULT_TOKEN_INDEX {
-            self.src_default_udp.send_to(buf, route_key.addr)
+            self.src_default_udp.send_all(buf, route_key.addr)
         } else {
             if let Some(udp) = self.udp_list.get(route_key.index) {
-                udp.send_to(buf, route_key.addr)
+                udp.send_all(buf, route_key.addr)
             } else {
                 Err(Error::new(ErrorKind::Other, "not fount"))
             }
@@ -368,7 +368,7 @@ impl<ID: Hash + Eq + Clone> Channel<ID> {
     }
     /// 发送到指定地址，将使用默认udpSocket发送
     pub fn send_to_addr(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
-        self.src_default_udp.send_to(buf, addr)
+        self.src_default_udp.send_all(buf, addr)
     }
     /// 添加到打洞队列
     pub fn punch(&self, peer_id: ID, nat_info: NatInfo) -> io::Result<()> {
