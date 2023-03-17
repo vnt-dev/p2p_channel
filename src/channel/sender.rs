@@ -141,7 +141,7 @@ impl<ID: Hash + Eq + Clone + Send + 'static> Sender<ID> {
         let lock = lock.lock();
         if let Some(old) = direct_route_table.insert(id.clone(), route) {
             if old.route_key() != route_key {
-                Sender::remove_id_route_(&id, &route_key, direct_route_table_time);
+                Sender::remove_id_route_(&id, &old.route_key(), direct_route_table_time);
             }
         }
         if let Some(entry) = direct_route_table_time.get(&route_key) {
