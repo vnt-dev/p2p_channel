@@ -106,6 +106,7 @@ impl SendAll for UdpSocket {
 
 impl SendAll for mio::net::UdpSocket {
     fn send_all(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
+        let mut count = 0;
         loop {
             return match self.send_to(buf, addr) {
                 Ok(len) => {
@@ -113,7 +114,11 @@ impl SendAll for mio::net::UdpSocket {
                 }
                 Err(e) => {
                     if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut {
+                        count += 1;
                         std::thread::yield_now();
+                        if count > 10 {
+                            return Err(e);
+                        }
                         continue;
                     }
                     Err(e)
