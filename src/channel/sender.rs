@@ -82,6 +82,7 @@ pub(crate) trait SendAll {
 
 impl SendAll for UdpSocket {
     fn send_all(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
+        let mut count = 0;
         loop {
             return match self.send_to(buf, addr) {
                 Ok(len) => {
@@ -90,6 +91,10 @@ impl SendAll for UdpSocket {
                 Err(e) => {
                     if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut {
                         std::thread::yield_now();
+                        count += 1;
+                        if count > 10 {
+                            return Err(e);
+                        }
                         continue;
                     }
                     Err(e)
