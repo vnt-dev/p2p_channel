@@ -1,7 +1,7 @@
 use std::hash::Hash;
 use std::io;
 use std::io::{Error, ErrorKind};
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,6 +17,7 @@ use parking_lot::{Mutex, RwLock};
 
 use crate::channel::sender::{SendAll, Sender};
 use crate::punch::{NatInfo, NatType};
+use crate::stun::socket::LocalInterface;
 
 pub mod sender;
 
@@ -458,6 +459,20 @@ impl<ID: Hash + Eq + Clone> Channel<ID> {
         }
         Ok(())
     }
+
+    /// 通过stun服务器检测并设定本地Nat类型
+    pub fn set_nat_type_with_stun(
+        &self,
+        stun_servers: Vec<String>,
+        default_interface: Option<LocalInterface>,
+    ) -> io::Result<(NatType, Vec<Ipv4Addr>, u16)> {
+        let (nat_type, public_ips, port_range) =
+            crate::stun::stun_test_nat(stun_servers, default_interface.as_ref())
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
+        self.set_nat_type(nat_type)?;
+        Ok((nat_type, public_ips, port_range))
+    }
+
     pub fn nat_type(&self) -> io::Result<NatType> {
         match self.status.load() {
             Status::Cone => Ok(NatType::Cone),
