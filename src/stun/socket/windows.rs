@@ -8,7 +8,7 @@ use windows_sys::Win32::Networking::WinSock::{
     htonl, setsockopt, AF_INET, IPPROTO_IP, IP_UNICAST_IF, SOCKADDR, SOCKADDR_IN, SOCKET_ERROR,
 };
 
-use crate::channel::socket::{LocalInterface, VntSocketTrait};
+use super::{LocalInterface, VntSocketTrait};
 
 impl VntSocketTrait for socket2::Socket {
     fn set_ip_unicast_if(&self, interface: &LocalInterface) -> anyhow::Result<()> {
