@@ -34,9 +34,11 @@ impl<ID> Punch<ID> {
             port_index: HashMap::new(),
         })
     }
-    pub fn new(cone_receiver: Receiver<(ID, NatInfo)>,
-               symmetric_receiver: Receiver<(ID, NatInfo)>,
-               sender: Sender<ID>, ) -> Punch<ID> {
+    pub fn new(
+        cone_receiver: Receiver<(ID, NatInfo)>,
+        symmetric_receiver: Receiver<(ID, NatInfo)>,
+        sender: Sender<ID>,
+    ) -> Punch<ID> {
         let mut port_vec: Vec<u16> = (1..65535).collect();
         port_vec.push(65535);
         let mut rng = rand::thread_rng();
@@ -57,12 +59,13 @@ impl<ID> Punch<ID> {
     pub fn next_cone(&self, timeout: Option<Duration>) -> io::Result<(ID, NatInfo)> {
         Punch::next_(&self.cone_receiver, timeout)
     }
-    fn next_(receiver: &Receiver<(ID, NatInfo)>, timeout: Option<Duration>) -> io::Result<(ID, NatInfo)> {
+    fn next_(
+        receiver: &Receiver<(ID, NatInfo)>,
+        timeout: Option<Duration>,
+    ) -> io::Result<(ID, NatInfo)> {
         let (id, nat_info) = if let Some(timeout) = timeout {
             match receiver.recv_timeout(timeout) {
-                Ok(rs) => {
-                    rs
-                }
+                Ok(rs) => rs,
                 Err(RecvTimeoutError::Timeout) => {
                     return Err(Error::from(ErrorKind::TimedOut));
                 }
@@ -72,9 +75,7 @@ impl<ID> Punch<ID> {
             }
         } else {
             match receiver.recv() {
-                Ok(rs) => {
-                    rs
-                }
+                Ok(rs) => rs,
                 Err(_) => {
                     return Err(Error::new(ErrorKind::Other, "close"));
                 }
@@ -85,12 +86,15 @@ impl<ID> Punch<ID> {
 }
 
 impl<ID: Clone + Eq + Hash> Punch<ID> {
+    /// 对nat_info指定的远端进行打洞操作
     pub fn punch(&mut self, buf: &[u8], id: ID, nat_info: NatInfo) -> io::Result<()> {
         if self.sender.is_close() {
             return Err(Error::new(ErrorKind::Other, "close"));
         }
         if !nat_info.local_ip.is_unspecified() || nat_info.local_port != 0 {
-            let _ = self.sender.send_to_addr(buf, SocketAddr::new(nat_info.local_ip, nat_info.local_port));
+            let _ = self
+                .sender
+                .send_to_addr(buf, SocketAddr::new(nat_info.local_ip, nat_info.local_port));
         }
         let is_cone = self.sender.is_clone();
         match nat_info.nat_type {
@@ -101,11 +105,7 @@ impl<ID: Clone + Eq + Hash> Punch<ID> {
                 // 前提 自己是锥形网络，否则猜中了也通信不了
 
                 //避免发送时NAT切换成对称网络，造成大量io
-                let (max_k1, max_k2) = if is_cone {
-                    (60, 800)
-                } else {
-                    (5, 10)
-                };
+                let (max_k1, max_k2) = if is_cone { (60, 800) } else { (5, 10) };
                 if nat_info.public_port_range < max_k1 * 4 {
                     //端口变化不大时，在预测的范围内随机发送
                     let min_port = if nat_info.public_port > nat_info.public_port_range {
@@ -113,12 +113,10 @@ impl<ID: Clone + Eq + Hash> Punch<ID> {
                     } else {
                         1
                     };
-                    let (max_port, overflow) = nat_info.public_port.overflowing_add(nat_info.public_port_range);
-                    let max_port = if overflow {
-                        65535
-                    } else {
-                        max_port
-                    };
+                    let (max_port, overflow) = nat_info
+                        .public_port
+                        .overflowing_add(nat_info.public_port_range);
+                    let max_port = if overflow { 65535 } else { max_port };
                     let k = if max_port - min_port + 1 > max_k1 {
                         max_k1 as usize
                     } else {
@@ -128,7 +126,13 @@ impl<ID: Clone + Eq + Hash> Punch<ID> {
                     nums.push(max_port);
                     let mut rng = rand::thread_rng();
                     nums.shuffle(&mut rng);
-                    self.punch_(&nums[..k], buf, &nat_info.public_ips, max_k1 as usize, is_cone)?;
+                    self.punch_(
+                        &nums[..k],
+                        buf,
+                        &nat_info.public_ips,
+                        max_k1 as usize,
+                        is_cone,
+                    )?;
                 }
                 let start = *self.port_index.entry(id.clone()).or_insert(0);
                 let mut end = start + max_k2;
@@ -137,7 +141,13 @@ impl<ID: Clone + Eq + Hash> Punch<ID> {
                     end = self.port_vec.len();
                     index = 0
                 }
-                self.punch_(&self.port_vec[start..end], buf, &nat_info.public_ips, max_k2, is_cone)?;
+                self.punch_(
+                    &self.port_vec[start..end],
+                    buf,
+                    &nat_info.public_ips,
+                    max_k2,
+                    is_cone,
+                )?;
                 self.port_index.insert(id, index);
             }
             NatType::Cone => {
@@ -149,7 +159,14 @@ impl<ID: Clone + Eq + Hash> Punch<ID> {
         }
         Ok(())
     }
-    fn punch_(&self, ports: &[u16], buf: &[u8], ips: &Vec<IpAddr>, max: usize, is_cone: bool) -> io::Result<()> {
+    fn punch_(
+        &self,
+        ports: &[u16],
+        buf: &[u8],
+        ips: &Vec<IpAddr>,
+        max: usize,
+        is_cone: bool,
+    ) -> io::Result<()> {
         let mut count = 0;
         for port in ports {
             for pub_ip in ips {
@@ -187,12 +204,14 @@ pub struct NatInfo {
 }
 
 impl NatInfo {
-    pub fn new(public_ips: Vec<IpAddr>,
-               public_port: u16,
-               public_port_range: u16,
-               local_ip: IpAddr,
-               local_port: u16,
-               nat_type: NatType, ) -> Self {
+    pub fn new(
+        public_ips: Vec<IpAddr>,
+        public_port: u16,
+        public_port_range: u16,
+        local_ip: IpAddr,
+        local_port: u16,
+        nat_type: NatType,
+    ) -> Self {
         Self {
             public_ips,
             public_port,

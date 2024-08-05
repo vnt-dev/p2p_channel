@@ -2,8 +2,8 @@ use std::hash::Hash;
 use std::io;
 use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crossbeam::atomic::AtomicCell;
@@ -11,8 +11,8 @@ use crossbeam::channel::{Sender as PunchSender, TrySendError};
 use crossbeam::sync::Unparker;
 use crossbeam_skiplist::SkipMap;
 use dashmap::DashMap;
-use mio::{Events, Interest, Poll, Token, Waker};
 use mio::net::UdpSocket as MioUdpSocket;
+use mio::{Events, Interest, Poll, Token, Waker};
 use parking_lot::{Mutex, RwLock};
 
 use crate::channel::sender::{SendAll, Sender};
@@ -29,8 +29,7 @@ pub struct Route {
 }
 
 impl Route {
-    pub fn new(index: usize,
-               addr: SocketAddr, metric: u8, rt: i64, ) -> Self {
+    pub fn new(index: usize, addr: SocketAddr, metric: u8, rt: i64) -> Self {
         Self {
             index,
             addr,
@@ -61,15 +60,10 @@ pub struct RouteKey {
 }
 
 impl RouteKey {
-    pub(crate) fn new(index: usize,
-                      addr: SocketAddr, ) -> Self {
-        Self {
-            index,
-            addr,
-        }
+    pub(crate) fn new(index: usize, addr: SocketAddr) -> Self {
+        Self { index, addr }
     }
 }
-
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub(crate) enum Status {
@@ -111,10 +105,14 @@ const DEFAULT_TOKEN: Token = Token(DEFAULT_TOKEN_INDEX);
 const CHANGE_TOKEN: Token = Token(10_0001);
 
 impl<ID: Eq + Hash> Channel<ID> {
-    pub(crate) fn new(size: usize, cone_sender: PunchSender<(ID, NatInfo)>,
-                      symmetric_sender: PunchSender<(ID, NatInfo)>,
-                      direct_route_table_time: Arc<SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>>,
-                      un_parker: Unparker, status: Arc<AtomicCell<Status>>) -> io::Result<Channel<ID>> {
+    pub(crate) fn new(
+        size: usize,
+        cone_sender: PunchSender<(ID, NatInfo)>,
+        symmetric_sender: PunchSender<(ID, NatInfo)>,
+        direct_route_table_time: Arc<SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>>,
+        un_parker: Unparker,
+        status: Arc<AtomicCell<Status>>,
+    ) -> io::Result<Channel<ID>> {
         let channel_flag_gen = Arc::new(AtomicU64::new(1));
         let channel_flag = 0;
         let src_default_udp = UdpSocket::bind("0.0.0.0:0")?;
@@ -125,7 +123,8 @@ impl<ID: Eq + Hash> Channel<ID> {
         let direct_route_table = Arc::new(DashMap::with_capacity(64));
         let poll = Poll::new()?;
         let waker = Waker::new(poll.registry(), CHANGE_TOKEN)?;
-        poll.registry().register(&mut default_udp, DEFAULT_TOKEN, Interest::READABLE)?;
+        poll.registry()
+            .register(&mut default_udp, DEFAULT_TOKEN, Interest::READABLE)?;
         let mut change_waker_list = Vec::with_capacity(16);
         change_waker_list.push((channel_flag, waker));
         let change_waker_list = Arc::new(Mutex::new(change_waker_list));
@@ -174,7 +173,8 @@ impl<ID: Eq + Hash> Channel<ID> {
         let direct_route_table_time = self.direct_route_table_time.clone();
         let poll = Poll::new()?;
         let waker = Waker::new(poll.registry(), CHANGE_TOKEN)?;
-        poll.registry().register(&mut default_udp, DEFAULT_TOKEN, Interest::READABLE)?;
+        poll.registry()
+            .register(&mut default_udp, DEFAULT_TOKEN, Interest::READABLE)?;
         let change_waker_list = self.change_waker_list.clone();
         change_waker_list.lock().push((channel_flag, waker));
         let events = Events::with_capacity(256);
@@ -208,16 +208,25 @@ impl<ID: Eq + Hash> Channel<ID> {
     }
 }
 
-
 impl<ID> Channel<ID> {
     #[inline]
-    fn update_time(direct_route_table_time: &SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>, route: &RouteKey) {
+    fn update_time(
+        direct_route_table_time: &SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>,
+        route: &RouteKey,
+    ) {
         if let Some(time) = direct_route_table_time.get(route) {
-            time.value().1.store(chrono::Local::now().timestamp_millis(), Ordering::Relaxed);
+            time.value()
+                .1
+                .store(chrono::Local::now().timestamp_millis(), Ordering::Relaxed);
         }
     }
     #[inline]
-    fn udp_recv_(direct_route_table_time: &SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>, udp: &MioUdpSocket, index: usize, buf: &mut [u8]) -> Option<io::Result<(usize, RouteKey)>> {
+    fn udp_recv_(
+        direct_route_table_time: &SkipMap<RouteKey, (Mutex<Vec<ID>>, AtomicI64, AtomicI64)>,
+        udp: &MioUdpSocket,
+        index: usize,
+        buf: &mut [u8],
+    ) -> Option<io::Result<(usize, RouteKey)>> {
         return match udp.recv_from(buf) {
             Ok((len, addr)) => {
                 let route = RouteKey::new(index, addr);
@@ -234,24 +243,42 @@ impl<ID> Channel<ID> {
     }
     /// 接收数据
     /// 如果当前是对称网络，将监听一组udp socket，提高打洞效率
-    pub fn recv_from(&mut self, buf: &mut [u8], timeout: Option<Duration>) -> io::Result<(usize, RouteKey)> {
+    pub fn recv_from(
+        &mut self,
+        buf: &mut [u8],
+        timeout: Option<Duration>,
+    ) -> io::Result<(usize, RouteKey)> {
         loop {
-            if let Some(rs) = Self::udp_recv_(&self.direct_route_table_time, &self.default_udp, DEFAULT_TOKEN_INDEX, buf) {
+            if let Some(rs) = Self::udp_recv_(
+                &self.direct_route_table_time,
+                &self.default_udp,
+                DEFAULT_TOKEN_INDEX,
+                buf,
+            ) {
                 return rs;
             }
             for index in 0..self.udp_list.len() {
-                if let Some(rs) = Self::udp_recv_(&self.direct_route_table_time, &self.udp_list[index], index, buf) {
+                if let Some(rs) = Self::udp_recv_(
+                    &self.direct_route_table_time,
+                    &self.udp_list[index],
+                    index,
+                    buf,
+                ) {
                     return rs;
                 }
             }
             self.poll.poll(&mut self.events, timeout)?;
             for event in self.events.iter() {
                 let (index, udp) = match event.token() {
-                    DEFAULT_TOKEN => {
-                        (DEFAULT_TOKEN_INDEX, &self.default_udp)
-                    }
+                    DEFAULT_TOKEN => (DEFAULT_TOKEN_INDEX, &self.default_udp),
                     CHANGE_TOKEN => {
-                        Channel::<ID>::change(&self.status, &self.share_info, &mut self.udp_list, &self.poll, self.size)?;
+                        Channel::<ID>::change(
+                            &self.status,
+                            &self.share_info,
+                            &mut self.udp_list,
+                            &self.poll,
+                            self.size,
+                        )?;
                         continue;
                     }
                     Token(index) => {
@@ -269,8 +296,13 @@ impl<ID> Channel<ID> {
         }
     }
 
-    fn change(status: &AtomicCell<Status>
-              , share_info: &RwLock<Vec<UdpSocket>>, udp_list: &mut Vec<MioUdpSocket>, poll: &Poll, size: usize) -> io::Result<()> {
+    fn change(
+        status: &AtomicCell<Status>,
+        share_info: &RwLock<Vec<UdpSocket>>,
+        udp_list: &mut Vec<MioUdpSocket>,
+        poll: &Poll,
+        size: usize,
+    ) -> io::Result<()> {
         match status.load() {
             Status::Cone => {
                 let mut list = share_info.write();
@@ -298,7 +330,9 @@ impl<ID> Channel<ID> {
                 let mut token = 0;
                 for udp in list.iter() {
                     let mut mio_udp = MioUdpSocket::from_std(udp.try_clone()?);
-                    let _ = poll.registry().register(&mut mio_udp, Token(token), Interest::READABLE);
+                    let _ =
+                        poll.registry()
+                            .register(&mut mio_udp, Token(token), Interest::READABLE);
                     udp_list.push(mio_udp);
                     token += 1;
                 }
@@ -314,7 +348,14 @@ impl<ID> Channel<ID> {
 impl<ID: Hash + Eq + Clone + Send + 'static> Channel<ID> {
     /// 添加路由
     pub fn add_route(&self, id: ID, route: Route) {
-        Sender::<ID>::add_route_(id, route, &self.lock, &self.direct_route_table_time, &self.direct_route_table, &self.un_parker);
+        Sender::<ID>::add_route_(
+            id,
+            route,
+            &self.lock,
+            &self.direct_route_table_time,
+            &self.direct_route_table,
+            &self.un_parker,
+        );
     }
     /// 更新路由信息
     pub fn update_route(&self, id: &ID, metric: u8, rt: i64) {
@@ -326,7 +367,12 @@ impl<ID: Hash + Eq + Clone + Send + 'static> Channel<ID> {
     }
     /// 删除路由
     pub fn remove_route(&self, id: &ID) {
-        Sender::<ID>::remove_route_(id, &self.lock, &self.direct_route_table_time, &self.direct_route_table);
+        Sender::<ID>::remove_route_(
+            id,
+            &self.lock,
+            &self.direct_route_table_time,
+            &self.direct_route_table,
+        );
     }
     /// 查第一个id
     pub fn route_to_id(&self, route_key: &RouteKey) -> Option<ID> {
@@ -342,12 +388,8 @@ impl<ID: Hash + Eq + Clone> Channel<ID> {
     /// 发送到指定id
     pub fn send_to_id(&self, buf: &[u8], id: &ID) -> io::Result<usize> {
         match self.direct_route_table.get(id) {
-            None => {
-                Err(Error::new(ErrorKind::Other, "not fount"))
-            }
-            Some(e) => {
-                self.send_to_route(buf, &e.value().route_key())
-            }
+            None => Err(Error::new(ErrorKind::Other, "not fount")),
+            Some(e) => self.send_to_route(buf, &e.value().route_key()),
         }
     }
     /// 发送到指定路由
@@ -383,12 +425,8 @@ impl<ID: Hash + Eq + Clone> Channel<ID> {
         }
         if let Err(e) = rs {
             return match e {
-                TrySendError::Full(_) => {
-                    Err(Error::new(ErrorKind::Other, "busy"))
-                }
-                TrySendError::Disconnected(_) => {
-                    Err(Error::new(ErrorKind::Other, "closed"))
-                }
+                TrySendError::Full(_) => Err(Error::new(ErrorKind::Other, "busy")),
+                TrySendError::Disconnected(_) => Err(Error::new(ErrorKind::Other, "closed")),
             };
         }
         Ok(())
@@ -422,15 +460,9 @@ impl<ID: Hash + Eq + Clone> Channel<ID> {
     }
     pub fn nat_type(&self) -> io::Result<NatType> {
         match self.status.load() {
-            Status::Cone => {
-                Ok(NatType::Cone)
-            }
-            Status::Symmetric => {
-                Ok(NatType::Symmetric)
-            }
-            Status::Close => {
-                Err(Error::new(ErrorKind::Other, "closed"))
-            }
+            Status::Cone => Ok(NatType::Cone),
+            Status::Symmetric => Ok(NatType::Symmetric),
+            Status::Close => Err(Error::new(ErrorKind::Other, "closed")),
         }
     }
     /// 关闭通道，recv将返回Err
