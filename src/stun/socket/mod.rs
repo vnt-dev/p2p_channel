@@ -84,7 +84,7 @@ pub fn bind_udp_ops(
             .with_context(|| format!("set_only_v6 failed: {}", &addr))?;
         socket
     };
-    socket.set_nonblocking(true)?;
+    socket.set_nonblocking(false)?;
     socket.bind(&addr.into())?;
     Ok(socket)
 }
