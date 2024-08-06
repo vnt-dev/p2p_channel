@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub struct Boot {}
 
 impl Boot {
-    /// size指定对称网络模型下用于打洞的端口数量，越大打洞速度越快
+    /// size指定对称网络类型时用于打洞的端口数量，根据需要设置，较大的相对打洞速度越快，太大会导致网络压力从而引发丢包和限流
     /// read_idle/write_idle指定添加到路由表的路由读/写超时时间
 
     pub fn new<ID: Eq + Hash>(
