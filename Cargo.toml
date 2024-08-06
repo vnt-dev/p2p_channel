@@ -1,7 +1,11 @@
 [package]
 name = "p2p_channel"
-version = "0.1.0"
+version = "0.5.0"
 edition = "2021"
+license = "Apache-2.0"
+readme = "README.md"
+description = "Simple, fast and easy Nat traversal for peer-to-peer"
+repository = "https://github.com/vnt-dev/p2p_channel"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -29,3 +33,10 @@ windows-sys = {version = "0.59.0",features = [ "Win32_Foundation",
     "Win32_System_IO",
     "Win32_System_Threading",
     "Win32_System_WindowsProgramming",]}
+
+
+[dev-dependencies]
+ctrlc2 = "3.5"
+clap = {version="4.5.13",features=["derive"]}
+log = "0.4.22"
+env_logger = "0.11.5"	
