@@ -161,7 +161,7 @@ fn main() {
                 info!("上报中继服务器成功");
             }
             Err(e) => {
-                info!("report server error!!! {e:?}");
+                panic!("report server error!!! {e:?}");
             }
         }
         //持续发送心跳
