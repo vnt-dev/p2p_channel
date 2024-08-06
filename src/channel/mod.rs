@@ -411,6 +411,9 @@ impl<ID: Hash + Eq + Clone> Channel<ID> {
     }
     /// 发送到指定地址，将使用默认udpSocket发送
     pub fn send_to_addr(&self, buf: &[u8], addr: SocketAddr) -> io::Result<usize> {
+        if self.is_close() {
+            return Err(Error::new(ErrorKind::Other, "closed"));
+        }
         self.src_default_udp.send_all(buf, addr)
     }
     /// 添加到打洞队列
