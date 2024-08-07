@@ -96,7 +96,7 @@ impl<ID: Clone + Eq + Hash> Punch<ID> {
                 .sender
                 .send_to_addr(buf, SocketAddr::new(nat_info.local_ip, nat_info.local_port));
         }
-        let is_cone = self.sender.is_clone();
+        let is_cone = self.sender.is_cone();
         match nat_info.nat_type {
             NatType::Symmetric => {
                 // 假设对方绑定n个端口，通过NAT对外映射出n个 公网ip:公网端口，自己随机尝试k次的情况下
