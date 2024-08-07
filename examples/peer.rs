@@ -278,6 +278,7 @@ fn main() {
     sig_rx.recv().expect("Could not receive from channel.");
     info!("exit");
     chanel3.close().unwrap();
+    drop(chanel3);
     _ = idle_thr.join();
     _ = punch_cone_thr.join();
     _ = puch_sym_thr.join();
