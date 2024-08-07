@@ -269,6 +269,16 @@ impl<ID> Channel<ID> {
                 }
             }
             self.poll.poll(&mut self.events, timeout)?;
+
+            // https://docs.rs/mio/1.0.1/mio/struct.Poll.html#notes
+            // 超时且poll返回Ok(())会在某些系统上出现
+            if self.events.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "timeout",
+                ));
+            }
+
             for event in self.events.iter() {
                 let (index, udp) = match event.token() {
                     DEFAULT_TOKEN => (DEFAULT_TOKEN_INDEX, &self.default_udp),
