@@ -30,7 +30,7 @@ impl<ID> Sender<ID> {
         self.status.load() == Status::Close
     }
     /// 当前是否是锥形网络
-    pub fn is_clone(&self) -> bool {
+    pub fn is_cone(&self) -> bool {
         self.status.load() == Status::Cone
     }
     pub fn try_clone(&self) -> io::Result<Sender<ID>> {
